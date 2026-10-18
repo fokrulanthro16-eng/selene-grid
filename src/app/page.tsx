@@ -90,7 +90,7 @@ def unoptimized_cross_attention(query, key, value):
       setDemoStep("COMPLETE");
       setTimeout(() => {
         setDemoStep(null);
-      }, 8000);
+      }, 30000);
     } catch (err) {
       console.error("Autonomous Demo State Machine Error:", err);
       setIsCompilerBusy(false);

@@ -53,11 +53,61 @@ export async function executeTriEngineOptimization(sourceCode: string): Promise<
     "Unvectorized scalar iterations detected. Missing Tensor Core tensorization."
   ];
 
+  // Engine 1: Google Gemini 2.5 Flash / Flash Latest (Primary Live High-Speed Inference)
+  if (geminiKey) {
+    const candidateModels = ["gemini-2.5-flash", "gemini-flash-latest"];
+    for (const model of candidateModels) {
+      try {
+        const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+        const res = await fetch(geminiEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `Rewrite this unoptimized PyTorch kernel for maximum tensor execution efficiency. Output valid Python code only with no surrounding discussion:\n\n${sourceCode}`
+                  }
+                ]
+              }
+            ]
+          })
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const data = await res.json();
+          const geminiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          const cleanedCode = cleanPythonOutput(geminiText);
+
+          return {
+            engine: "Gemini-2.5",
+            optimizedCode: cleanedCode || fallbackOptimizedPyTorch(),
+            diagnostics: diagnostics.concat([
+              `Gemini AST Diagnostic applied via ${model}.`,
+              "Thermodynamic gradient verified against PUE 1.15 datacenter profile."
+            ]),
+            metrics: calculateThermodynamics(2.4e12, 0.98e12)
+          };
+        }
+      } catch {
+        // Fallback to next candidate or engine
+      }
+    }
+  }
+
+  // Engine 2: Nebius Token Factory (Meta Llama 3.1 70B)
   if (nebiusKey && nebiusKey.startsWith("v1.")) {
     try {
       const nebiusClient = new OpenAI({
         baseURL: process.env.NEBIUS_BASE_URL || process.env.NEXT_PUBLIC_NEBIUS_BASE_URL || "https://api.studio.nebius.ai/v1",
         apiKey: nebiusKey,
+        timeout: 4000,
         dangerouslyAllowBrowser: true,
       });
 
@@ -90,52 +140,11 @@ export async function executeTriEngineOptimization(sourceCode: string): Promise<
         metrics: calculateThermodynamics(2.4e12, 0.98e12)
       };
     } catch {
-      // Fallback to Gemini
+      // Fallback to deterministic
     }
   }
 
-  if (geminiKey) {
-    const candidateModels = ["gemini-2.5-flash", "gemini-flash-latest"];
-    for (const model of candidateModels) {
-      try {
-        const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-        const res = await fetch(geminiEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `Rewrite this unoptimized PyTorch kernel for maximum tensor execution efficiency. Output valid Python code only with no surrounding discussion:\n\n${sourceCode}`
-                  }
-                ]
-              }
-            ]
-          })
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const geminiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          const cleanedCode = cleanPythonOutput(geminiText);
-
-          return {
-            engine: "Gemini-2.5",
-            optimizedCode: cleanedCode || fallbackOptimizedPyTorch(),
-            diagnostics: diagnostics.concat([
-              `Gemini AST Diagnostic applied via ${model}.`,
-              "Thermodynamic gradient verified against PUE 1.15 datacenter profile."
-            ]),
-            metrics: calculateThermodynamics(2.4e12, 0.98e12)
-          };
-        }
-      } catch {
-        // Fallback to next candidate or deterministic
-      }
-    }
-  }
-
+  // Engine 3: Deterministic AST Fallback Engine
   return {
     engine: "Deterministic-AST-Fallback",
     optimizedCode: fallbackOptimizedPyTorch(),
